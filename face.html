@@ -10,10 +10,9 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             height: 100vh; margin: 0; background-color: #f4f6f9;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden;
-            cursor: pointer; /* 클릭 유도를 위한 커서 */
+            cursor: pointer;
         }
 
-        /* 메인 카메라 영역 */
         .main-wrapper {
             display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;
             transition: all 0.3s ease;
@@ -26,7 +25,6 @@
         video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
         
-        /* 모던 상태 표시줄 */
         #status {
             margin-top: 24px; padding: 16px 32px; background: white; border-radius: 50px;
             font-size: 16px; font-weight: 700; color: #1c1e21; 
@@ -34,7 +32,6 @@
             text-align: center;
         }
 
-        /* 역동적인 전체화면 결과창 */
         #successScreen {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%);
@@ -46,7 +43,7 @@
         }
         .success-content {
             text-align: center; transform: translateY(40px) scale(0.95); opacity: 0;
-            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s; /* 부드럽게 튀어오르는 효과 */
+            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s;
         }
         #successScreen.active .success-content {
             transform: translateY(0) scale(1); opacity: 1;
@@ -90,12 +87,11 @@
         let isVerified = false;
         let isRequesting = false;
         
-        // 미리 전송을 위한 변수 추가
         let capturedFrames = [];
         let earlyCaptured = false;
         let backendPromise = null;
+        let isBackendWoken = false; // 백엔드 예열 상태 변수
 
-        // 화면 클릭 시 전체화면 기능
         document.body.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch((err) => {
@@ -139,7 +135,7 @@
             faceapi.matchDimensions(canvas, displaySize);
 
             setInterval(async () => {
-                if (isRequesting) return; // 서버 요청 중이면 감지 일시중지
+                if (isRequesting) return;
 
                 const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
                     .withFaceLandmarks();
@@ -148,6 +144,18 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 if (resized.length > 0) {
+                    // [추가됨] 얼굴이 감지되자마자 백엔드 예열(Wake-up) 신호 전송
+                    if (!isBackendWoken) {
+                        isBackendWoken = true;
+                        fetch('https://jaewondev2.pythonanywhere.com/wakeup').catch(()=>{});
+                    }
+
+                    // [추가됨] 얼굴이 여러 개일 경우 박스 면적(가로x세로)이 가장 큰(가장 가까운) 사람을 최우선으로 정렬
+                    resized.sort((a, b) => {
+                        return (b.detection.box.width * b.detection.box.height) - (a.detection.box.width * a.detection.box.height);
+                    });
+
+                    // 가장 가까운 사람의 데이터만 타겟팅
                     const det = resized[0];
                     const box = det.detection.box;
                     const nose = det.landmarks.getNose()[3];
@@ -163,51 +171,47 @@
                     if (moveDist > 0.5 && moveDist < 8 && sizeDiff < 3) {
                         score++;
                         
-                        // [핵심 로직] 사람 판별 도중(score 2, 4, 6) 프레임을 미리 여러 장 캡처
                         if ([2, 4, 6].includes(score) && capturedFrames.length < 3) {
                             const tempCanvas = document.createElement('canvas');
                             tempCanvas.width = video.videoWidth; tempCanvas.height = video.videoHeight;
                             const tCtx = tempCanvas.getContext('2d');
                             tCtx.translate(tempCanvas.width, 0); tCtx.scale(-1, 1); tCtx.drawImage(video, 0, 0);
-                            capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.8)); // 80% 화질로 최적화
+                            capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.8));
                         }
 
-                        // [핵심 로직] 3장이 모이면 사람 판별(score 8)이 끝나기 전에 백엔드로 미리 전송
                         if (score === 6 && !earlyCaptured) {
                             earlyCaptured = true;
                             backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ images: capturedFrames }) // 여러 장 배열 전송
+                                body: JSON.stringify({ images: capturedFrames })
                             }).then(res => res.json()).catch(err => ({success: false, error: true}));
                         }
 
                     } else if (moveDist >= 8 || sizeDiff >= 3) {
                         score = Math.max(0, score - 5);
-                        capturedFrames = []; earlyCaptured = false; backendPromise = null; // 비정상 감지 시 초기화
+                        capturedFrames = []; earlyCaptured = false; backendPromise = null;
                         statusText.innerText = "비정상적 움직임 감지! 고정해주세요.";
                         statusText.style.color = "#FF3B30";
                     }
 
                     if (score > 8) isVerified = true;
 
-                    // 상태 업데이트 및 결과 출력
                     if (isVerified && !isRequesting) {
                         isRequesting = true;
-                        statusText.innerText = "실제 인물 확인됨. 결과 출력 중...";
+                        statusText.innerText = "실제 인물 확인됨. 보안 검증 중...";
                         statusText.style.color = "#007AFF";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
 
-                        // 미리 날려둔 백엔드 요청 결과를 기다려서 바로 처리
                         if (backendPromise) {
                             backendPromise.then(data => {
                                 if (data.success) {
                                     document.getElementById('welcomeName').innerText = `${data.name}님 환영합니다`;
                                     document.getElementById('infoName').innerText = `이름: ${data.name}`;
                                     document.getElementById('infoBirth').innerText = `생년월일: ${data.birthdate}`;
-                                    successScreen.classList.add('active'); // 전체화면 활성화
+                                    successScreen.classList.add('active');
                                 } else {
-                                    statusText.innerText = "등록되지 않은 사용자거나 일치하지 않습니다.";
+                                    statusText.innerText = data.message || "등록되지 않은 사용자거나 보안 검증에 실패했습니다.";
                                     statusText.style.color = "#FF3B30";
                                     setTimeout(() => { 
                                         isVerified = false; score = 0; isRequesting = false; 
