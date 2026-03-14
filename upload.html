@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>정밀 안면 인식 시스템 - 등록</title>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        body {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; margin: 0; background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden;
+        }
+
+        /* 메인 카메라 영역 (초기엔 숨김) */
+        .main-wrapper {
+            display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%;
+        }
+        .camera-container {
+            position: relative; width: 90vw; max-width: 420px; height: 65vh; max-height: 550px;
+            border-radius: 30px; overflow: hidden; background: #000;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+        
+        /* 모던 버튼 스타일 */
+        .btn {
+            padding: 16px 32px; border-radius: 16px; font-size: 16px; font-weight: 600; 
+            border: none; cursor: pointer; transition: all 0.2s ease; width: 90vw; max-width: 420px;
+            margin-top: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .btn:active { transform: translateY(2px); box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+        .btn:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; box-shadow: none; transform: none; }
+        .btn-primary { background: #007AFF; color: white; }
+        .btn-success { background: #34C759; color: white; }
+        .btn-secondary { background: #F2F2F7; color: #FF3B30; box-shadow: none; }
+
+        /* 모던 모달 스타일 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center; z-index: 100;
+        }
+        .modal-content {
+            background: white; width: 85vw; max-width: 360px; padding: 32px 24px;
+            border-radius: 28px; box-shadow: 0 24px 48px rgba(0,0,0,0.2);
+            text-align: center; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .modal-title { margin: 0 0 8px 0; font-size: 22px; font-weight: 700; color: #1c1e21; }
+        .modal-desc { margin: 0 0 24px 0; font-size: 14px; color: #6b7280; }
+        
+        /* 모던 입력창 스타일 */
+        .modern-input {
+            width: 100%; padding: 16px; margin-bottom: 12px; border-radius: 14px;
+            border: 1.5px solid #e5e7eb; background: #f9fafb; font-size: 16px;
+            box-sizing: border-box; transition: all 0.2s ease; color: #1c1e21;
+        }
+        .modern-input::placeholder { color: #9ca3af; }
+        .modern-input:focus {
+            border-color: #007AFF; background: white; outline: none;
+            box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
+        }
+
+        /* 확인 모달용 사진 미리보기 */
+        .preview-box {
+            width: 100%; height: 250px; border-radius: 16px; overflow: hidden;
+            margin-bottom: 20px; background: #000;
+        }
+        .preview-box img {
+            width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);
+        }
+        .modal-actions { display: flex; gap: 12px; margin-top: 20px; }
+        .modal-actions .btn { margin-top: 0; width: 100%; padding: 14px 0; border-radius: 14px; font-size: 15px;}
+
+    </style>
+</head>
+<body>
+
+    <div id="infoModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 class="modal-title">사용자 등록</h2>
+            <p class="modal-desc">얼굴 등록을 위해 정보를 입력해주세요.</p>
+            <input type="text" id="nameInput" class="modern-input" placeholder="이름을 입력하세요" autocomplete="off">
+            <input type="number" id="birthInput" class="modern-input" placeholder="생년월일 6자리 (예: 900101)" autocomplete="off">
+            <button id="startCameraBtn" class="btn btn-primary" style="width: 100%;">다음으로</button>
+        </div>
+    </div>
+
+    <div id="mainWrapper" class="main-wrapper">
+        <div class="camera-container">
+            <video id="video" autoplay muted playsinline></video>
+            <canvas id="overlay"></canvas>
+        </div>
+        <button id="captureBtn" class="btn btn-primary" disabled>카메라 준비 중...</button>
+    </div>
+
+    <div id="confirmModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h2 class="modal-title">사진 확인</h2>
+            <p class="modal-desc">이 사진으로 등록하시겠습니까?</p>
+            <div class="preview-box">
+                <img id="previewImage" src="">
+            </div>
+            <div class="modal-actions">
+                <button id="retakeBtn" class="btn btn-secondary">다시 찍기</button>
+                <button id="confirmBtn" class="btn btn-success">등록 완료하기</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 요소 선택
+        const infoModal = document.getElementById('infoModal');
+        const mainWrapper = document.getElementById('mainWrapper');
+        const confirmModal = document.getElementById('confirmModal');
+        
+        const nameInput = document.getElementById('nameInput');
+        const birthInput = document.getElementById('birthInput');
+        const startCameraBtn = document.getElementById('startCameraBtn');
+        
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('overlay');
+        const captureBtn = document.getElementById('captureBtn');
+        
+        const previewImage = document.getElementById('previewImage');
+        const retakeBtn = document.getElementById('retakeBtn');
+        const confirmBtn = document.getElementById('confirmBtn');
+
+        let userName = "";
+        let userBirth = "";
+        let currentImgData = null;
+
+        // --- 정보 입력 모달 로직 ---
+        startCameraBtn.addEventListener('click', () => {
+            userName = nameInput.value.trim();
+            userBirth = birthInput.value.trim();
+
+            if (!userName || !userBirth) {
+                alert("이름과 생년월일을 모두 입력해주세요.");
+                return;
+            }
+
+            // 모달 닫고 카메라 화면 표시 후 초기화 실행
+            infoModal.style.display = 'none';
+            mainWrapper.style.display = 'flex';
+            init(); // 입력 완료 시점에 카메라 켬
+        });
+
+        // --- 기존 안면 인식 코어 로직 완벽 유지 ---
+        async function init() {
+            const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+            ]);
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                video.play();
+                captureBtn.innerText = "사진 촬영";
+                captureBtn.disabled = false;
+                detect();
+            };
+        }
+
+        function drawBox(ctx, x, y, w, h, radius, color) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + w - radius, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+            ctx.lineTo(x + w, y + h - radius);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+            ctx.lineTo(x + radius, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.stroke();
+        }
+
+        async function detect() {
+            const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
+            faceapi.matchDimensions(canvas, displaySize);
+
+            setInterval(async () => {
+                // 확인 모달이 떠있을 때는 인식 중지(최적화)
+                if (confirmModal.style.display === 'flex') return;
+
+                const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
+                    .withFaceLandmarks();
+                const resized = faceapi.resizeResults(results, displaySize);
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (resized.length > 0) {
+                    const det = resized[0];
+                    const box = det.detection.box;
+
+                    const adjW = box.width * 1.45; 
+                    const adjH = box.height * 1.25; 
+                    const adjX = box.x - (adjW - box.width) / 2;
+                    const adjY = box.y - (adjH * 0.25);
+
+                    drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
+                }
+            }, 50);
+        }
+
+        // --- 사진 촬영 및 확인 로직 ---
+        captureBtn.addEventListener('click', () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tCtx = tempCanvas.getContext('2d');
+            tCtx.translate(tempCanvas.width, 0);
+            tCtx.scale(-1, 1);
+            tCtx.drawImage(video, 0, 0);
+            
+            currentImgData = tempCanvas.toDataURL('image/jpeg');
+            previewImage.src = currentImgData;
+            
+            // 확인 모달 띄우기
+            confirmModal.style.display = 'flex';
+        });
+
+        retakeBtn.addEventListener('click', () => {
+            confirmModal.style.display = 'none';
+            currentImgData = null;
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            confirmBtn.disabled = true;
+            retakeBtn.disabled = true;
+            confirmBtn.innerText = "서버 전송 중...";
+
+            fetch('https://jaewondev2.pythonanywhere.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    name: userName, 
+                    birthdate: userBirth, 
+                    image: currentImgData 
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert("데이터베이스에 얼굴 등록이 완료되었습니다.");
+                    
+                    // 완료 후 초기 상태로 되돌리기 (새 사용자 등록을 위해)
+                    confirmModal.style.display = 'none';
+                    mainWrapper.style.display = 'none';
+                    infoModal.style.display = 'flex';
+                    nameInput.value = "";
+                    birthInput.value = "";
+                    
+                } else {
+                    alert(data.message || "등록에 실패했습니다. (얼굴이 감지되지 않았을 수 있습니다.)");
+                }
+            })
+            .catch(err => {
+                alert("서버 통신 오류가 발생했습니다.");
+            })
+            .finally(() => {
+                confirmBtn.disabled = false;
+                retakeBtn.disabled = false;
+                confirmBtn.innerText = "등록 완료하기";
+            });
+        });
+    </script>
+</body>
+</html>
