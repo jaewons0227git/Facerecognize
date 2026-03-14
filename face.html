@@ -14,20 +14,17 @@
             height: 100vh;
             margin: 0;
             background-color: #f8f9fa;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             color: #333;
-            overflow: hidden; /* 전체화면 시 스크롤 방지 */
+            overflow: hidden;
         }
 
         h2 {
             font-size: 20px;
             font-weight: 600;
             margin-bottom: 24px;
-            color: #111;
-            letter-spacing: -0.5px;
         }
 
-        /* 모바일 최적화 세로형 둥근 직사각형 */
         .rounded-rect-mask {
             width: 75vw;
             max-width: 320px;
@@ -35,11 +32,8 @@
             max-height: 480px;
             border-radius: 32px;
             overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             background-color: #e9ecef;
-            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.08);
             border: 4px solid #ffffff;
             position: relative;
         }
@@ -48,17 +42,13 @@
             position: relative;
             width: 100%;
             height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
         }
 
         video {
             width: 100%;
             height: 100%;
-            display: block;
+            object-fit: cover;
             transform: scaleX(-1); /* 거울 모드 */
-            object-fit: cover; /* 화면에 꽉 차게 */
         }
 
         canvas {
@@ -68,41 +58,36 @@
             width: 100%;
             height: 100%;
             transform: scaleX(-1);
-            pointer-events: none; /* 클릭 방해 금지 */
+            pointer-events: none;
         }
 
-        /* 권한 요청용 시작 버튼 */
         #start-btn {
             position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             z-index: 10;
             padding: 16px 32px;
             background-color: #007AFF;
             color: white;
             border: none;
             border-radius: 24px;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
-            box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
             cursor: pointer;
             display: none; /* 모델 로드 전까지 숨김 */
+            white-space: nowrap;
         }
 
-        #start-btn:active {
-            background-color: #005bb5;
-        }
-
-        /* 상태 텍스트 */
         #status {
             margin-top: 30px;
-            font-size: 15px;
+            font-size: 14px;
             color: #555;
-            font-weight: 500;
-            background-color: #ffffff;
             padding: 12px 24px;
+            background: white;
             border-radius: 20px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
             text-align: center;
-            line-height: 1.4;
         }
     </style>
 </head>
@@ -126,82 +111,101 @@
         const statusText = document.getElementById('status');
         const startBtn = document.getElementById('start-btn');
 
-        // 1. 모델 로드 (이때 카메라는 켜지 않음)
-        Promise.all([
-            faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights')
-        ]).then(() => {
-            statusText.innerText = "준비 완료! 버튼을 눌러주세요.";
-            startBtn.style.display = "block"; // 모델 로드 후 버튼 표시
-        }).catch(err => {
-            console.error(err);
-            statusText.innerText = "네트워크 연결을 확인해주세요.";
-            statusText.style.color = "#d93025";
-        });
-
-        // 2. 버튼 클릭 시 전체화면 & 카메라 권한 요청
-        startBtn.addEventListener('click', () => {
-            startBtn.style.display = "none"; // 버튼 숨김
-            statusText.innerText = "카메라 권한을 확인 중...";
-            statusText.style.color = "#555";
-
-            // 전체화면 요청 (지원하는 브라우저인 경우)
-            if (document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen().catch(() => {});
-            } else if (document.documentElement.webkitRequestFullscreen) {
-                document.documentElement.webkitRequestFullscreen().catch(() => {});
+        // 1. 모델 로드 함수
+        async function init() {
+            try {
+                // 모델 파일 경로 (GitHub 저장소의 가중치 파일 사용)
+                const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+                
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                
+                statusText.innerText = "준비 완료! 버튼을 눌러주세요.";
+                startBtn.style.display = "block";
+            } catch (err) {
+                console.error(err);
+                statusText.innerText = "모델 로드 실패. 인터넷 연결을 확인하세요.";
             }
+        }
 
-            // 카메라 권한 요청 (전면 카메라 우선)
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
-                .then(stream => {
-                    video.srcObject = stream;
-                    statusText.innerText = "안면인식중..";
-                    statusText.style.color = "#007AFF";
-                })
-                .catch(err => {
-                    console.error("카메라 에러:", err);
-                    
-                    // 에러 원인 상세 출력
-                    let errorReason = "알 수 없는 오류";
-                    if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-                        errorReason = "카메라 장치를 찾을 수 없습니다 (웹캠 연결 확인)";
-                    } else if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                        errorReason = "권한이 차단되었습니다 (브라우저 설정 확인)";
-                    } else if (!window.isSecureContext) {
-                        errorReason = "보안 연결(HTTPS/localhost)이 아닙니다";
-                    }
+        // 2. 카메라 시작 버튼 이벤트
+        startBtn.addEventListener('click', async () => {
+            startBtn.style.display = "none";
+            statusText.innerText = "카메라 권한 요청 중...";
 
-                    statusText.innerHTML = `카메라 실행 실패<br><span style='font-size:13px;color:#d93025;'>원인: ${errorReason}</span>`;
-                    statusText.style.color = "#d93025";
-                    startBtn.style.display = "block"; 
-                    startBtn.innerText = "다시 시도";
+            try {
+                // 브라우저 전체화면 시도
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    } 
                 });
+                
+                video.srcObject = stream;
+                
+                // 비디오 재생 보장 (특히 iOS)
+                await video.play();
+                
+                statusText.innerText = "얼굴을 프레임 안에 맞춰주세요.";
+                statusText.style.color = "#007AFF";
+            } catch (err) {
+                console.error("카메라 에러:", err);
+                let msg = "카메라를 켤 수 없습니다.";
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                    msg = "보안 에러: HTTPS 연결이 필요합니다.";
+                } else if (err.name === 'NotAllowedError') {
+                    msg = "권한 거부됨: 브라우저 설정에서 카메라를 허용해주세요.";
+                }
+                statusText.innerHTML = `<span style="color:#d93025">${msg}</span>`;
+                startBtn.style.display = "block";
+                startBtn.innerText = "다시 시도";
+            }
         });
 
-        // 3. 비디오 재생 시 얼굴 인식 시작
-        video.addEventListener('play', () => {
-            const displaySize = { width: video.clientWidth, height: video.clientHeight };
+        // 3. 비디오 재생 시 얼굴 인식 루프 시작
+        video.addEventListener('playing', () => {
+            // 비디오의 실제 표시 크기에 맞춰 캔버스 크기 조정
+            const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
             setInterval(async () => {
-                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+                // TinyFaceDetector 사용 (모바일에서 빠름)
+                const detections = await faceapi.detectAllFaces(
+                    video, 
+                    new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 })
+                );
+                
                 const resizedDetections = faceapi.resizeResults(detections, displaySize);
                 
                 const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height); // 이전 프레임 지우기
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                // 파란색 윤곽선 사각형 그리기
+                if (resizedDetections.length > 0) {
+                    statusText.innerText = "얼굴 인식 성공";
+                    statusText.style.color = "#34C759";
+                } else {
+                    statusText.innerText = "얼굴을 찾는 중...";
+                    statusText.style.color = "#007AFF";
+                }
+
+                // 인식된 얼굴 사각형 그리기
                 resizedDetections.forEach(detection => {
-                    const box = detection.box;
-                    ctx.beginPath();
-                    ctx.lineWidth = 2.5;
+                    const { x, y, width, height } = detection.box;
                     ctx.strokeStyle = '#007AFF';
-                    ctx.lineJoin = "round"; // 모서리를 살짝 부드럽게
-                    ctx.rect(box.x, box.y, box.width, box.height);
-                    ctx.stroke();
+                    ctx.lineWidth = 3;
+                    ctx.lineJoin = 'round';
+                    ctx.strokeRect(x, y, width, height);
                 });
-            }, 100); 
+            }, 100);
         });
+
+        // 초기화 실행
+        init();
     </script>
 </body>
 </html>
