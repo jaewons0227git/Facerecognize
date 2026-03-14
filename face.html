@@ -8,35 +8,76 @@
     <style>
         body {
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            height: 100vh; margin: 0; background-color: #f0f2f5;
-            font-family: -apple-system, sans-serif; overflow: hidden;
+            height: 100vh; margin: 0; background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden;
+            cursor: pointer; /* 클릭 유도를 위한 커서 */
+        }
+
+        /* 메인 카메라 영역 */
+        .main-wrapper {
+            display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;
+            transition: all 0.3s ease;
         }
         .camera-container {
             position: relative; width: 90vw; max-width: 420px; height: 65vh; max-height: 550px;
             border-radius: 30px; overflow: hidden; background: #000;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
         }
         video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+        
+        /* 모던 상태 표시줄 */
         #status {
-            margin-top: 25px; padding: 14px 28px; background: white; border-radius: 50px;
-            font-size: 15px; font-weight: 700; color: #1c1e21; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            margin-top: 24px; padding: 16px 32px; background: white; border-radius: 50px;
+            font-size: 16px; font-weight: 700; color: #1c1e21; 
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08); transition: all 0.3s ease;
+            text-align: center;
         }
+
+        /* 모던 모달 (결과 화면) */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center; z-index: 100;
+            opacity: 0; visibility: hidden; transition: opacity 0.4s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1; visibility: visible;
+        }
+        .modal-content {
+            background: white; width: 85vw; max-width: 340px; padding: 40px 24px;
+            border-radius: 28px; box-shadow: 0 24px 48px rgba(0,0,0,0.2);
+            text-align: center; 
+            transform: scale(0.8) translateY(30px); opacity: 0; 
+            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* 역동적인 팝업 애니메이션 */
+        }
+        .modal-overlay.active .modal-content {
+            transform: scale(1) translateY(0); opacity: 1;
+        }
+
+        .welcome-title { margin: 0 0 16px 0; font-size: 22px; font-weight: 800; color: #1c1e21; }
+        .info-label { font-size: 13px; color: #9ca3af; margin-bottom: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+        .info-text { font-size: 16px; color: #374151; font-weight: 600; margin-bottom: 6px; }
     </style>
 </head>
 <body>
 
-    <div class="camera-container" id="cameraContainer">
-        <video id="video" autoplay muted playsinline></video>
-        <canvas id="overlay"></canvas>
+    <div class="main-wrapper" id="cameraContainer">
+        <div class="camera-container">
+            <video id="video" autoplay muted playsinline></video>
+            <canvas id="overlay"></canvas>
+        </div>
+        <div id="status">시스템 준비 중...</div>
     </div>
-    <div id="status">시스템 준비 중...</div>
-    <div id="successScreen" style="display: none; text-align: center;">
-        <img src="https://cdn-icons-png.flaticon.com/512/5494/5494997.png" width="120" style="margin-bottom: 20px;">
-        <h2 id="welcomeName" style="color: #1c1e21; margin: 0 0 10px 0;">이름님 환영합니다</h2>
-        <div style="font-size: 12px; color: #666; margin-bottom: 5px;">회원정보</div>
-        <div id="infoName" style="font-size: 15px; color: #333; font-weight: bold;">이름: </div>
-        <div id="infoBirth" style="font-size: 15px; color: #333; font-weight: bold;">생년월일: </div>
+
+    <div id="successScreen" class="modal-overlay">
+        <div class="modal-content">
+            <img src="https://cdn-icons-png.flaticon.com/512/5494/5494997.png" width="110" style="margin-bottom: 24px; filter: drop-shadow(0 8px 16px rgba(0,122,255,0.2));">
+            <h2 id="welcomeName" class="welcome-title">이름님 환영합니다</h2>
+            <div class="info-label">회원정보</div>
+            <div id="infoName" class="info-text">이름: </div>
+            <div id="infoBirth" class="info-text">생년월일: </div>
+        </div>
     </div>
 
     <script>
@@ -51,6 +92,15 @@
         let score = 0;
         let isVerified = false;
         let isRequesting = false;
+
+        // 화면 클릭 시 전체화면 기능
+        document.body.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch((err) => {
+                    console.log(`전체화면 전환 오류: ${err.message}`);
+                });
+            }
+        });
 
         async function init() {
             const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
@@ -100,7 +150,7 @@
                     const box = det.detection.box;
                     const nose = det.landmarks.getNose()[3];
 
-                    // 1. 박스 비율 조정 (가로 확장 45%로 살짝 더 늘림, 세로 축소)
+                    // 1. 박스 비율 조정
                     const adjW = box.width * 1.45; 
                     const adjH = box.height * 1.25; 
                     const adjX = box.x - (adjW - box.width) / 2;
@@ -115,14 +165,16 @@
                     } else if (moveDist >= 8 || sizeDiff >= 3) {
                         score = Math.max(0, score - 5);
                         statusText.innerText = "비정상적 움직임 감지! 고정해주세요.";
+                        statusText.style.color = "#FF3B30";
                     }
 
-                    if (score > 20) isVerified = true;
+                    // 판별 시간 대폭 단축 (20 -> 8로 변경하여 약 0.4초만에 사람인지 인식)
+                    if (score > 8) isVerified = true;
 
                     // 상태 업데이트 및 서버 전송 로직
                     if (isVerified && !isRequesting) {
                         isRequesting = true;
-                        statusText.innerText = "서버에서 인증 분석 중...";
+                        statusText.innerText = "실제 인물 확인됨. 서버에서 신원 분석 중...";
                         statusText.style.color = "#007AFF";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
 
@@ -145,23 +197,22 @@
                         .then(res => res.json())
                         .then(data => {
                             if (data.success) {
-                                // 인증 성공 화면
-                                cameraContainer.style.display = 'none';
-                                statusText.style.display = 'none';
-                                successScreen.style.display = 'block';
+                                // 인증 성공 시 부드럽고 역동적인 애니메이션 호출
                                 document.getElementById('welcomeName').innerText = `${data.name}님 환영합니다`;
                                 document.getElementById('infoName').innerText = `이름: ${data.name}`;
                                 document.getElementById('infoBirth').innerText = `생년월일: ${data.birthdate}`;
+                                
+                                successScreen.classList.add('active'); // 모달 활성화
                             } else {
                                 statusText.innerText = "등록되지 않은 사용자거나 일치하지 않습니다.";
                                 statusText.style.color = "#FF3B30";
-                                setTimeout(() => { isVerified = false; score = 0; isRequesting = false; }, 2000);
+                                setTimeout(() => { isVerified = false; score = 0; isRequesting = false; statusText.style.color = "#1c1e21"; }, 2000);
                             }
                         })
                         .catch(err => {
                             statusText.innerText = "서버 연결 오류가 발생했습니다.";
                             statusText.style.color = "#FF3B30";
-                            setTimeout(() => { isVerified = false; score = 0; isRequesting = false; }, 2000);
+                            setTimeout(() => { isVerified = false; score = 0; isRequesting = false; statusText.style.color = "#1c1e21"; }, 2000);
                         });
 
                     } else if (!isVerified) {
@@ -176,8 +227,9 @@
                     score = 0;
                     isVerified = false;
                     statusText.innerText = "얼굴이 감지되지 않습니다.";
+                    statusText.style.color = "#1c1e21";
                 }
-            }, 50); // 감지 주기 100ms -> 50ms로 단축 (속도 향상)
+            }, 50);
         }
 
         init();
