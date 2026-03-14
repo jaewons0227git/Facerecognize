@@ -3,208 +3,183 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>안면 인식 시스템</title>
-    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <title>정밀 안면 인식 시스템</title>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f8f9fa;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            color: #333;
-            overflow: hidden;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; margin: 0; background-color: #f0f2f5;
+            font-family: -apple-system, sans-serif; overflow: hidden;
         }
-
-        h2 {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 24px;
+        .camera-container {
+            position: relative; width: 90vw; max-width: 420px; height: 65vh; max-height: 550px;
+            border-radius: 30px; overflow: hidden; background: #000;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.25);
         }
-
-        .rounded-rect-mask {
-            width: 75vw;
-            max-width: 320px;
-            height: 60vh;
-            max-height: 480px;
-            border-radius: 32px;
-            overflow: hidden;
-            background-color: #e9ecef;
-            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.08);
-            border: 4px solid #ffffff;
-            position: relative;
-        }
-
-        .video-wrapper {
-            position: relative;
-            width: 100%;
-            height: 100%;
-        }
-
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* 거울 모드 */
-        }
-
-        canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            transform: scaleX(-1);
-            pointer-events: none;
-        }
-
-        #start-btn {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 10;
-            padding: 16px 32px;
-            background-color: #007AFF;
-            color: white;
-            border: none;
-            border-radius: 24px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            display: none; /* 모델 로드 전까지 숨김 */
-            white-space: nowrap;
-        }
-
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
         #status {
-            margin-top: 30px;
-            font-size: 14px;
-            color: #555;
-            padding: 12px 24px;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-            text-align: center;
+            margin-top: 25px; padding: 14px 28px; background: white; border-radius: 50px;
+            font-size: 15px; font-weight: 700; color: #1c1e21; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         }
     </style>
 </head>
 <body>
 
-    <h2>본인 인증</h2>
-    
-    <div class="rounded-rect-mask">
-        <div class="video-wrapper">
-            <button id="start-btn">카메라 켜기</button>
-            <video id="video" autoplay muted playsinline></video>
-            <canvas id="overlay"></canvas>
-        </div>
+    <div class="camera-container" id="cameraContainer">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
     </div>
-    
-    <div id="status">AI 시스템 로딩 중...</div>
+    <div id="status">시스템 준비 중...</div>
+    <div id="successScreen" style="display: none; text-align: center;">
+        <img src="https://cdn-icons-png.flaticon.com/512/5494/5494997.png" width="120" style="margin-bottom: 20px;">
+        <h2 id="welcomeName" style="color: #1c1e21; margin: 0 0 10px 0;">이름님 환영합니다</h2>
+        <div style="font-size: 12px; color: #666; margin-bottom: 5px;">회원정보</div>
+        <div id="infoName" style="font-size: 15px; color: #333; font-weight: bold;">이름: </div>
+        <div id="infoBirth" style="font-size: 15px; color: #333; font-weight: bold;">생년월일: </div>
+    </div>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('overlay');
         const statusText = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
+        const cameraContainer = document.getElementById('cameraContainer');
+        const successScreen = document.getElementById('successScreen');
 
-        // 1. 모델 로드 함수
+        let lastNosePos = { x: 0, y: 0 };
+        let lastBoxWidth = 0;
+        let score = 0;
+        let isVerified = false;
+        let isRequesting = false;
+
         async function init() {
-            try {
-                // 모델 파일 경로 (GitHub 저장소의 가중치 파일 사용)
-                const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
-                
-                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-                
-                statusText.innerText = "준비 완료! 버튼을 눌러주세요.";
-                startBtn.style.display = "block";
-            } catch (err) {
-                console.error(err);
-                statusText.innerText = "모델 로드 실패. 인터넷 연결을 확인하세요.";
-            }
+            const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+            ]);
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                video.play();
+                detect();
+            };
         }
 
-        // 2. 카메라 시작 버튼 이벤트
-        startBtn.addEventListener('click', async () => {
-            startBtn.style.display = "none";
-            statusText.innerText = "카메라 권한 요청 중...";
+        function drawBox(ctx, x, y, w, h, radius, color) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + w - radius, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+            ctx.lineTo(x + w, y + h - radius);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+            ctx.lineTo(x + radius, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.stroke();
+        }
 
-            try {
-                // 브라우저 전체화면 시도
-                if (document.documentElement.requestFullscreen) {
-                    document.documentElement.requestFullscreen().catch(() => {});
-                }
-
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        facingMode: 'user',
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    } 
-                });
-                
-                video.srcObject = stream;
-                
-                // 비디오 재생 보장 (특히 iOS)
-                await video.play();
-                
-                statusText.innerText = "얼굴을 프레임 안에 맞춰주세요.";
-                statusText.style.color = "#007AFF";
-            } catch (err) {
-                console.error("카메라 에러:", err);
-                let msg = "카메라를 켤 수 없습니다.";
-                if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                    msg = "보안 에러: HTTPS 연결이 필요합니다.";
-                } else if (err.name === 'NotAllowedError') {
-                    msg = "권한 거부됨: 브라우저 설정에서 카메라를 허용해주세요.";
-                }
-                statusText.innerHTML = `<span style="color:#d93025">${msg}</span>`;
-                startBtn.style.display = "block";
-                startBtn.innerText = "다시 시도";
-            }
-        });
-
-        // 3. 비디오 재생 시 얼굴 인식 루프 시작
-        video.addEventListener('playing', () => {
-            // 비디오의 실제 표시 크기에 맞춰 캔버스 크기 조정
+        async function detect() {
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
             setInterval(async () => {
-                // TinyFaceDetector 사용 (모바일에서 빠름)
-                const detections = await faceapi.detectAllFaces(
-                    video, 
-                    new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 })
-                );
-                
-                const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                
+                if (isRequesting) return; // 서버 요청 중이면 감지 일시중지
+
+                const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
+                    .withFaceLandmarks();
+                const resized = faceapi.resizeResults(results, displaySize);
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                if (resizedDetections.length > 0) {
-                    statusText.innerText = "얼굴 인식 성공";
-                    statusText.style.color = "#34C759";
+
+                if (resized.length > 0) {
+                    const det = resized[0];
+                    const box = det.detection.box;
+                    const nose = det.landmarks.getNose()[3];
+
+                    // 1. 박스 비율 조정 (가로 확장 45%로 살짝 더 늘림, 세로 축소)
+                    const adjW = box.width * 1.45; 
+                    const adjH = box.height * 1.25; 
+                    const adjX = box.x - (adjW - box.width) / 2;
+                    const adjY = box.y - (adjH * 0.25);
+
+                    // 2. 가짜 흔들기 차단 로직 (Anti-Spoofing)
+                    const moveDist = Math.hypot(nose.x - lastNosePos.x, nose.y - lastNosePos.y);
+                    const sizeDiff = Math.abs(box.width - lastBoxWidth);
+
+                    if (moveDist > 0.5 && moveDist < 8 && sizeDiff < 3) {
+                        score++;
+                    } else if (moveDist >= 8 || sizeDiff >= 3) {
+                        score = Math.max(0, score - 5);
+                        statusText.innerText = "비정상적 움직임 감지! 고정해주세요.";
+                    }
+
+                    if (score > 20) isVerified = true;
+
+                    // 상태 업데이트 및 서버 전송 로직
+                    if (isVerified && !isRequesting) {
+                        isRequesting = true;
+                        statusText.innerText = "서버에서 인증 분석 중...";
+                        statusText.style.color = "#007AFF";
+                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
+
+                        // 사진 캡처 (좌우 반전 처리)
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = video.videoWidth;
+                        tempCanvas.height = video.videoHeight;
+                        const tCtx = tempCanvas.getContext('2d');
+                        tCtx.translate(tempCanvas.width, 0);
+                        tCtx.scale(-1, 1);
+                        tCtx.drawImage(video, 0, 0);
+                        const imgData = tempCanvas.toDataURL('image/jpeg');
+
+                        // 백엔드 요청
+                        fetch('https://jaewondev2.pythonanywhere.com/recognize', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image: imgData })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                // 인증 성공 화면
+                                cameraContainer.style.display = 'none';
+                                statusText.style.display = 'none';
+                                successScreen.style.display = 'block';
+                                document.getElementById('welcomeName').innerText = `${data.name}님 환영합니다`;
+                                document.getElementById('infoName').innerText = `이름: ${data.name}`;
+                                document.getElementById('infoBirth').innerText = `생년월일: ${data.birthdate}`;
+                            } else {
+                                statusText.innerText = "등록되지 않은 사용자거나 일치하지 않습니다.";
+                                statusText.style.color = "#FF3B30";
+                                setTimeout(() => { isVerified = false; score = 0; isRequesting = false; }, 2000);
+                            }
+                        })
+                        .catch(err => {
+                            statusText.innerText = "서버 연결 오류가 발생했습니다.";
+                            statusText.style.color = "#FF3B30";
+                            setTimeout(() => { isVerified = false; score = 0; isRequesting = false; }, 2000);
+                        });
+
+                    } else if (!isVerified) {
+                        statusText.innerText = "사용자 분석 중 (정면을 응시하세요)";
+                        statusText.style.color = "#1c1e21";
+                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#ccc');
+                    }
+
+                    lastNosePos = { x: nose.x, y: nose.y };
+                    lastBoxWidth = box.width;
                 } else {
-                    statusText.innerText = "얼굴을 찾는 중...";
-                    statusText.style.color = "#007AFF";
+                    score = 0;
+                    isVerified = false;
+                    statusText.innerText = "얼굴이 감지되지 않습니다.";
                 }
+            }, 50); // 감지 주기 100ms -> 50ms로 단축 (속도 향상)
+        }
 
-                // 인식된 얼굴 사각형 그리기
-                resizedDetections.forEach(detection => {
-                    const { x, y, width, height } = detection.box;
-                    ctx.strokeStyle = '#007AFF';
-                    ctx.lineWidth = 3;
-                    ctx.lineJoin = 'round';
-                    ctx.strokeRect(x, y, width, height);
-                });
-            }, 100);
-        });
-
-        // 초기화 실행
         init();
     </script>
 </body>
