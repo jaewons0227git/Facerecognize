@@ -90,7 +90,11 @@
         let capturedFrames = [];
         let earlyCaptured = false;
         let backendPromise = null;
-        let isBackendWoken = false; // 백엔드 예열 상태 변수
+        let isBackendWoken = false; 
+        
+        // 오류 메시지 깜빡임 방지용 타이머
+        let isAbnormal = false;
+        let abnormalTimer = null;
 
         document.body.addEventListener('click', () => {
             if (!document.fullscreenElement) {
@@ -139,23 +143,24 @@
 
                 const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
                     .withFaceLandmarks();
+                
+                // [중요 수정] 분석 대기 시간 동안 인증이 완료되었거나 요청이 들어갔다면 즉시 중단 (엇갈림 버그 해결)
+                if (isRequesting) return; 
+
                 const resized = faceapi.resizeResults(results, displaySize);
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 if (resized.length > 0) {
-                    // [추가됨] 얼굴이 감지되자마자 백엔드 예열(Wake-up) 신호 전송
                     if (!isBackendWoken) {
                         isBackendWoken = true;
                         fetch('https://jaewondev2.pythonanywhere.com/wakeup').catch(()=>{});
                     }
 
-                    // [추가됨] 얼굴이 여러 개일 경우 박스 면적(가로x세로)이 가장 큰(가장 가까운) 사람을 최우선으로 정렬
                     resized.sort((a, b) => {
                         return (b.detection.box.width * b.detection.box.height) - (a.detection.box.width * a.detection.box.height);
                     });
 
-                    // 가장 가까운 사람의 데이터만 타겟팅
                     const det = resized[0];
                     const box = det.detection.box;
                     const nose = det.landmarks.getNose()[3];
@@ -171,15 +176,21 @@
                     if (moveDist > 0.5 && moveDist < 8 && sizeDiff < 3) {
                         score++;
                         
-                        if ([2, 4, 6].includes(score) && capturedFrames.length < 3) {
+                        // [최적화 핵심] 초반(1, 3, 5)에 매우 빠르게 사진을 캡처하고, 사이즈를 320px로 대폭 줄여서 저장
+                        if ([1, 3, 5].includes(score) && capturedFrames.length < 3) {
                             const tempCanvas = document.createElement('canvas');
-                            tempCanvas.width = video.videoWidth; tempCanvas.height = video.videoHeight;
+                            const scale = 320 / video.videoWidth; // 속도를 위한 리사이징 비율
+                            tempCanvas.width = 320; 
+                            tempCanvas.height = video.videoHeight * scale;
                             const tCtx = tempCanvas.getContext('2d');
-                            tCtx.translate(tempCanvas.width, 0); tCtx.scale(-1, 1); tCtx.drawImage(video, 0, 0);
-                            capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.8));
+                            tCtx.translate(tempCanvas.width, 0); 
+                            tCtx.scale(-1, 1); 
+                            tCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                            capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.6)); // 용량 최적화 (60% 화질)
                         }
 
-                        if (score === 6 && !earlyCaptured) {
+                        // 스코어 5에서 가벼워진 사진을 즉시 전송
+                        if (score === 5 && !earlyCaptured) {
                             earlyCaptured = true;
                             backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
                                 method: 'POST',
@@ -191,15 +202,20 @@
                     } else if (moveDist >= 8 || sizeDiff >= 3) {
                         score = Math.max(0, score - 5);
                         capturedFrames = []; earlyCaptured = false; backendPromise = null;
+                        
+                        isAbnormal = true; // 비정상 상태 플래그 켜기
                         statusText.innerText = "비정상적 움직임 감지! 고정해주세요.";
                         statusText.style.color = "#FF3B30";
+                        
+                        clearTimeout(abnormalTimer);
+                        abnormalTimer = setTimeout(() => { isAbnormal = false; }, 1000); // 1초간 문구 유지
                     }
 
                     if (score > 8) isVerified = true;
 
                     if (isVerified && !isRequesting) {
-                        isRequesting = true;
-                        statusText.innerText = "실제 인물 확인됨. 보안 검증 중...";
+                        isRequesting = true; // 이후 로직 모두 잠금
+                        statusText.innerText = "실제 인물 확인됨. 최종 보안 검증 중...";
                         statusText.style.color = "#007AFF";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
 
@@ -211,7 +227,7 @@
                                     document.getElementById('infoBirth').innerText = `생년월일: ${data.birthdate}`;
                                     successScreen.classList.add('active');
                                 } else {
-                                    statusText.innerText = data.message || "등록되지 않은 사용자거나 보안 검증에 실패했습니다.";
+                                    statusText.innerText = data.message || "보안 검증 실패: 미등록자이거나 가로채기 감지됨.";
                                     statusText.style.color = "#FF3B30";
                                     setTimeout(() => { 
                                         isVerified = false; score = 0; isRequesting = false; 
@@ -221,10 +237,14 @@
                                 }
                             });
                         }
-                    } else if (!isVerified) {
+                    } else if (!isVerified && !isAbnormal) {
+                        // 비정상 움직임 경고가 떠있지 않을 때만 기본 문구 표시 (글씨 덮어쓰기 방지)
                         statusText.innerText = "사용자 분석 중 (정면을 응시하세요)";
                         statusText.style.color = "#1c1e21";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#ccc');
+                    } else if (isAbnormal) {
+                        // 비정상 감지 상태일 때 박스 빨간색으로 변경
+                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#FF3B30');
                     }
 
                     lastNosePos = { x: nose.x, y: nose.y };
@@ -233,8 +253,10 @@
                     score = 0;
                     isVerified = false;
                     capturedFrames = []; earlyCaptured = false; backendPromise = null;
-                    statusText.innerText = "얼굴이 감지되지 않습니다.";
-                    statusText.style.color = "#1c1e21";
+                    if (!isAbnormal) {
+                        statusText.innerText = "얼굴이 감지되지 않습니다.";
+                        statusText.style.color = "#1c1e21";
+                    }
                 }
             }, 50);
         }
