@@ -26,7 +26,6 @@
         video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transition: opacity 0.3s ease; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); transition: opacity 0.3s ease; }
         
-        /* 서버 로딩 중 카메라 끄기 & 흰색 배경 전환 */
         .camera-container.loading {
             background-color: #ffffff;
         }
@@ -39,14 +38,13 @@
             display: block;
         }
 
-        /* 구글 스타일 로딩 스피너 */
         .spinner {
             position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
             margin: -25px 0 0 -25px; animation: rotate 2s linear infinite;
             display: none; z-index: 10;
         }
         .spinner .path {
-            stroke: #007AFF; stroke-linecap: round; /* 양끝 둥글게 */
+            stroke: #007AFF; stroke-linecap: round;
             animation: dash 1.5s ease-in-out infinite;
         }
         @keyframes rotate { 100% { transform: rotate(360deg); } }
@@ -247,7 +245,6 @@
                         statusText.innerText = "서버 결과 동기화 중...";
                         statusText.style.color = "#007AFF";
                         
-                        // [추가됨] 인증 대기 중 카메라 숨기고 로딩 스피너 표시
                         document.querySelector('.camera-container').classList.add('loading');
 
                         if (backendPromise) {
@@ -261,7 +258,6 @@
                                     statusText.innerText = data.message || "보안 검증 실패: 미등록자이거나 가로채기 감지됨.";
                                     statusText.style.color = "#FF3B30";
                                     setTimeout(() => { 
-                                        // [추가됨] 실패 시 다시 카메라 켜기
                                         document.querySelector('.camera-container').classList.remove('loading');
                                         isVerified = false; score = 0; isRequesting = false; 
                                         capturedFrames = []; earlyCaptured = false; backendPromise = null;
@@ -275,7 +271,8 @@
                         statusText.style.color = "#1c1e21";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#ccc');
                     } else if (isAbnormal) {
-                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#FF3B30');
+                        // 빨간색 오류 박스를 파란색 박스로 변경
+                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
                     }
 
                     lastNosePos = { x: nose.x, y: nose.y };
