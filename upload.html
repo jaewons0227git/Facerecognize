@@ -10,10 +10,9 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             height: 100vh; margin: 0; background-color: #f4f6f9;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden;
-            cursor: pointer; /* 클릭 유도를 위한 커서 */
+            cursor: pointer;
         }
 
-        /* 메인 카메라 영역 (초기엔 숨김) */
         .main-wrapper {
             display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%;
         }
@@ -25,7 +24,6 @@
         video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
         
-        /* 모던 버튼 스타일 */
         .btn {
             padding: 16px 32px; border-radius: 16px; font-size: 16px; font-weight: 600; 
             border: none; cursor: pointer; transition: all 0.2s ease; width: 90vw; max-width: 420px;
@@ -37,7 +35,6 @@
         .btn-success { background: #34C759; color: white; }
         .btn-secondary { background: #F2F2F7; color: #FF3B30; box-shadow: none; }
 
-        /* 모던 모달 스타일 */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px);
@@ -55,7 +52,6 @@
         .modal-title { margin: 0 0 8px 0; font-size: 22px; font-weight: 700; color: #1c1e21; }
         .modal-desc { margin: 0 0 24px 0; font-size: 14px; color: #6b7280; }
         
-        /* 모던 입력창 스타일 */
         .modern-input {
             width: 100%; padding: 16px; margin-bottom: 12px; border-radius: 14px;
             border: 1.5px solid #e5e7eb; background: #f9fafb; font-size: 16px;
@@ -67,7 +63,6 @@
             box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
         }
 
-        /* 확인 모달용 사진 미리보기 */
         .preview-box {
             width: 100%; height: 250px; border-radius: 16px; overflow: hidden;
             margin-bottom: 20px; background: #000;
@@ -115,7 +110,6 @@
     </div>
 
     <script>
-        // 요소 선택
         const infoModal = document.getElementById('infoModal');
         const mainWrapper = document.getElementById('mainWrapper');
         const confirmModal = document.getElementById('confirmModal');
@@ -136,7 +130,6 @@
         let userBirth = "";
         let currentImgData = null;
 
-        // 화면 클릭 시 전체화면 기능
         document.body.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch((err) => {
@@ -145,7 +138,6 @@
             }
         });
 
-        // --- 정보 입력 모달 로직 ---
         startCameraBtn.addEventListener('click', () => {
             userName = nameInput.value.trim();
             userBirth = birthInput.value.trim();
@@ -155,13 +147,11 @@
                 return;
             }
 
-            // 모달 닫고 카메라 화면 표시 후 초기화 실행
             infoModal.style.display = 'none';
             mainWrapper.style.display = 'flex';
-            init(); // 입력 완료 시점에 카메라 켬
+            init(); 
         });
 
-        // --- 기존 안면 인식 코어 로직 완벽 유지 ---
         async function init() {
             const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
             await Promise.all([
@@ -198,8 +188,8 @@
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
+            // 저가형 태블릿 최적화 (50ms -> 150ms 로 부하 감소)
             setInterval(async () => {
-                // 확인 모달이 떠있을 때는 인식 중지(최적화)
                 if (confirmModal.style.display === 'flex') return;
 
                 const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
@@ -219,10 +209,9 @@
 
                     drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
                 }
-            }, 50);
+            }, 150);
         }
 
-        // --- 사진 촬영 및 확인 로직 ---
         captureBtn.addEventListener('click', () => {
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = video.videoWidth;
@@ -235,7 +224,6 @@
             currentImgData = tempCanvas.toDataURL('image/jpeg');
             previewImage.src = currentImgData;
             
-            // 확인 모달 띄우기
             confirmModal.style.display = 'flex';
         });
 
@@ -263,7 +251,6 @@
                 if (data.success) {
                     alert("데이터베이스에 얼굴 등록이 완료되었습니다.");
                     
-                    // 완료 후 초기 상태로 되돌리기 (새 사용자 등록을 위해)
                     confirmModal.style.display = 'none';
                     mainWrapper.style.display = 'none';
                     infoModal.style.display = 'flex';
