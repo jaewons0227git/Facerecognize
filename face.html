@@ -171,11 +171,12 @@
                     const moveDist = Math.hypot(nose.x - lastNosePos.x, nose.y - lastNosePos.y);
                     const sizeDiff = Math.abs(box.width - lastBoxWidth);
 
-                    if (moveDist > 0.5 && moveDist < 8 && sizeDiff < 3) {
+                    // [수정됨] 손떨림, 카메라 흔들림을 모두 허용하도록 정상 범위를 대폭 완화 (8 -> 25, 3 -> 15)
+                    if (moveDist > 0.5 && moveDist < 25 && sizeDiff < 15) {
                         score++;
                         
-                        // [수정됨] 정확성을 위해 원본 해상도 그대로 캡처 (화질 저하 없음)
-                        if ([1, 3, 5].includes(score) && capturedFrames.length < 3) {
+                        // [속도 극대화] 감지되자마자 (스코어 1, 2, 3) 즉시 3장을 연사
+                        if ([1, 2, 3].includes(score) && capturedFrames.length < 3) {
                             const tempCanvas = document.createElement('canvas');
                             tempCanvas.width = video.videoWidth; 
                             tempCanvas.height = video.videoHeight;
@@ -183,12 +184,11 @@
                             tCtx.translate(tempCanvas.width, 0); 
                             tCtx.scale(-1, 1); 
                             tCtx.drawImage(video, 0, 0);
-                            
-                            // 0.9 품질의 원본 사이즈 JPEG로 인코딩 (Base64 숫자/문자열 형태로 변환됨)
                             capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.9)); 
                         }
 
-                        if (score === 5 && !earlyCaptured) {
+                        // [속도 극대화] 3장이 모이는 즉시(스코어 3) 백엔드에 미리 던져놓고 계산을 시킴 (비동기)
+                        if (score === 3 && !earlyCaptured) {
                             earlyCaptured = true;
                             backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
                                 method: 'POST',
@@ -197,7 +197,8 @@
                             }).then(res => res.json()).catch(err => ({success: false, error: true}));
                         }
 
-                    } else if (moveDist >= 8 || sizeDiff >= 3) {
+                    } else if (moveDist >= 25 || sizeDiff >= 15) {
+                        // 극단적인 비정상 흔들림일 때만 차단
                         score = Math.max(0, score - 5);
                         capturedFrames = []; earlyCaptured = false; backendPromise = null;
                         
@@ -209,14 +210,16 @@
                         abnormalTimer = setTimeout(() => { isAbnormal = false; }, 1000); 
                     }
 
-                    if (score > 8) isVerified = true;
+                    // 프론트엔드에서 사람인지 최종 확인하는 타이밍 (약 0.3초)
+                    if (score > 6) isVerified = true;
 
                     if (isVerified && !isRequesting) {
                         isRequesting = true; 
-                        statusText.innerText = "실제 인물 확인됨. 최종 보안 검증 중...";
+                        statusText.innerText = "서버 결과 동기화 중...";
                         statusText.style.color = "#007AFF";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
 
+                        // 백엔드에서 미리 계산해둔 결과가 있으면 즉시 띄우고, 아직 계산 중이면 마저 기다림
                         if (backendPromise) {
                             backendPromise.then(data => {
                                 if (data.success) {
