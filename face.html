@@ -21,10 +21,41 @@
             position: relative; width: 90vw; max-width: 420px; height: 65vh; max-height: 550px;
             border-radius: 30px; overflow: hidden; background: #000;
             box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            transition: background-color 0.3s ease;
         }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transition: opacity 0.3s ease; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); transition: opacity 0.3s ease; }
         
+        /* 서버 로딩 중 카메라 끄기 & 흰색 배경 전환 */
+        .camera-container.loading {
+            background-color: #ffffff;
+        }
+        .camera-container.loading video,
+        .camera-container.loading canvas {
+            opacity: 0;
+            visibility: hidden;
+        }
+        .camera-container.loading .spinner {
+            display: block;
+        }
+
+        /* 구글 스타일 로딩 스피너 */
+        .spinner {
+            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
+            margin: -25px 0 0 -25px; animation: rotate 2s linear infinite;
+            display: none; z-index: 10;
+        }
+        .spinner .path {
+            stroke: #007AFF; stroke-linecap: round; /* 양끝 둥글게 */
+            animation: dash 1.5s ease-in-out infinite;
+        }
+        @keyframes rotate { 100% { transform: rotate(360deg); } }
+        @keyframes dash {
+            0% { stroke-dasharray: 1, 150; stroke-dashoffset: 0; }
+            50% { stroke-dasharray: 90, 150; stroke-dashoffset: -35; }
+            100% { stroke-dasharray: 90, 150; stroke-dashoffset: -124; }
+        }
+
         #status {
             margin-top: 24px; padding: 16px 32px; background: white; border-radius: 50px;
             font-size: 16px; font-weight: 700; color: #1c1e21; 
@@ -60,6 +91,9 @@
         <div class="camera-container">
             <video id="video" autoplay muted playsinline></video>
             <canvas id="overlay"></canvas>
+            <svg class="spinner" viewBox="0 0 50 50">
+                <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+            </svg>
         </div>
         <div id="status">시스템 준비 중...</div>
     </div>
@@ -171,11 +205,9 @@
                     const moveDist = Math.hypot(nose.x - lastNosePos.x, nose.y - lastNosePos.y);
                     const sizeDiff = Math.abs(box.width - lastBoxWidth);
 
-                    // [수정됨] 손떨림, 카메라 흔들림을 모두 허용하도록 정상 범위를 대폭 완화 (8 -> 25, 3 -> 15)
                     if (moveDist > 0.5 && moveDist < 25 && sizeDiff < 15) {
                         score++;
                         
-                        // [속도 극대화] 감지되자마자 (스코어 1, 2, 3) 즉시 3장을 연사
                         if ([1, 2, 3].includes(score) && capturedFrames.length < 3) {
                             const tempCanvas = document.createElement('canvas');
                             tempCanvas.width = video.videoWidth; 
@@ -187,7 +219,6 @@
                             capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.9)); 
                         }
 
-                        // [속도 극대화] 3장이 모이는 즉시(스코어 3) 백엔드에 미리 던져놓고 계산을 시킴 (비동기)
                         if (score === 3 && !earlyCaptured) {
                             earlyCaptured = true;
                             backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
@@ -198,7 +229,6 @@
                         }
 
                     } else if (moveDist >= 25 || sizeDiff >= 15) {
-                        // 극단적인 비정상 흔들림일 때만 차단
                         score = Math.max(0, score - 5);
                         capturedFrames = []; earlyCaptured = false; backendPromise = null;
                         
@@ -210,16 +240,16 @@
                         abnormalTimer = setTimeout(() => { isAbnormal = false; }, 1000); 
                     }
 
-                    // 프론트엔드에서 사람인지 최종 확인하는 타이밍 (약 0.3초)
                     if (score > 6) isVerified = true;
 
                     if (isVerified && !isRequesting) {
                         isRequesting = true; 
                         statusText.innerText = "서버 결과 동기화 중...";
                         statusText.style.color = "#007AFF";
-                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
+                        
+                        // [추가됨] 인증 대기 중 카메라 숨기고 로딩 스피너 표시
+                        document.querySelector('.camera-container').classList.add('loading');
 
-                        // 백엔드에서 미리 계산해둔 결과가 있으면 즉시 띄우고, 아직 계산 중이면 마저 기다림
                         if (backendPromise) {
                             backendPromise.then(data => {
                                 if (data.success) {
@@ -231,6 +261,8 @@
                                     statusText.innerText = data.message || "보안 검증 실패: 미등록자이거나 가로채기 감지됨.";
                                     statusText.style.color = "#FF3B30";
                                     setTimeout(() => { 
+                                        // [추가됨] 실패 시 다시 카메라 켜기
+                                        document.querySelector('.camera-container').classList.remove('loading');
                                         isVerified = false; score = 0; isRequesting = false; 
                                         capturedFrames = []; earlyCaptured = false; backendPromise = null;
                                         statusText.style.color = "#1c1e21"; 
