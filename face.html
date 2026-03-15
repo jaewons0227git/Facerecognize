@@ -127,11 +127,46 @@
         let isAbnormal = false;
         let abnormalTimer = null;
 
+        // 5번 터치 초기화 관련 변수
+        let tapCount = 0;
+        let tapTimer = null;
+
         document.body.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch((err) => {
                     console.log(`전체화면 전환 오류: ${err.message}`);
                 });
+            }
+        });
+
+        // [추가됨] 환영합니다 화면을 5번 누르면 초기화되는 이벤트
+        successScreen.addEventListener('click', (e) => {
+            e.stopPropagation(); // 전체화면 토글 이벤트 방지
+            tapCount++;
+            clearTimeout(tapTimer);
+
+            if (tapCount >= 5) {
+                // 초기화 로직 실행
+                successScreen.classList.remove('active');
+                document.querySelector('.camera-container').classList.remove('loading');
+                
+                isVerified = false; 
+                score = 0; 
+                isRequesting = false; 
+                capturedFrames = []; 
+                earlyCaptured = false; 
+                backendPromise = null;
+                isBackendWoken = false;
+                isAbnormal = false;
+                
+                statusText.innerText = "시스템 준비 중...";
+                statusText.style.color = "#1c1e21";
+                
+                tapCount = 0;
+            } else {
+                tapTimer = setTimeout(() => {
+                    tapCount = 0;
+                }, 1500); // 1.5초 이내에 5번을 터치해야만 인정
             }
         });
 
@@ -169,6 +204,7 @@
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
+            // 저가형 태블릿 최적화 (50ms -> 150ms 로 부하 대폭 감소)
             setInterval(async () => {
                 if (isRequesting) return;
 
@@ -271,7 +307,6 @@
                         statusText.style.color = "#1c1e21";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#ccc');
                     } else if (isAbnormal) {
-                        // 빨간색 오류 박스를 파란색 박스로 변경
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
                     }
 
@@ -286,7 +321,7 @@
                         statusText.style.color = "#1c1e21";
                     }
                 }
-            }, 50);
+            }, 150);
         }
 
         init();
