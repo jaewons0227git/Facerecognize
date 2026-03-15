@@ -236,42 +236,27 @@
                     const adjX = box.x - (adjW - box.width) / 2;
                     const adjY = box.y - (adjH * 0.25);
 
-                    const moveDist = Math.hypot(nose.x - lastNosePos.x, nose.y - lastNosePos.y);
-                    const sizeDiff = Math.abs(box.width - lastBoxWidth);
+                    // [수정됨] 프론트엔드의 비정상 움직임(사진) 판별 로직 완전 제거. 얼굴 감지 시 무조건 점수 상승 및 캡처 진행
+                    score++;
+                    
+                    if ([1, 2, 3].includes(score) && capturedFrames.length < 3) {
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = video.videoWidth; 
+                        tempCanvas.height = video.videoHeight;
+                        const tCtx = tempCanvas.getContext('2d');
+                        tCtx.translate(tempCanvas.width, 0); 
+                        tCtx.scale(-1, 1); 
+                        tCtx.drawImage(video, 0, 0);
+                        capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.9)); 
+                    }
 
-                    if (moveDist > 0.5 && moveDist < 25 && sizeDiff < 15) {
-                        score++;
-                        
-                        if ([1, 2, 3].includes(score) && capturedFrames.length < 3) {
-                            const tempCanvas = document.createElement('canvas');
-                            tempCanvas.width = video.videoWidth; 
-                            tempCanvas.height = video.videoHeight;
-                            const tCtx = tempCanvas.getContext('2d');
-                            tCtx.translate(tempCanvas.width, 0); 
-                            tCtx.scale(-1, 1); 
-                            tCtx.drawImage(video, 0, 0);
-                            capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.9)); 
-                        }
-
-                        if (score === 3 && !earlyCaptured) {
-                            earlyCaptured = true;
-                            backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ images: capturedFrames })
-                            }).then(res => res.json()).catch(err => ({success: false, error: true}));
-                        }
-
-                    } else if (moveDist >= 25 || sizeDiff >= 15) {
-                        score = Math.max(0, score - 5);
-                        capturedFrames = []; earlyCaptured = false; backendPromise = null;
-                        
-                        isAbnormal = true; 
-                        statusText.innerText = "비정상적 움직임 감지! 고정해주세요.";
-                        statusText.style.color = "#FF3B30";
-                        
-                        clearTimeout(abnormalTimer);
-                        abnormalTimer = setTimeout(() => { isAbnormal = false; }, 1000); 
+                    if (score === 3 && !earlyCaptured) {
+                        earlyCaptured = true;
+                        backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ images: capturedFrames })
+                        }).then(res => res.json()).catch(err => ({success: false, error: true}));
                     }
 
                     if (score > 6) isVerified = true;
@@ -302,12 +287,10 @@
                                 }
                             });
                         }
-                    } else if (!isVerified && !isAbnormal) {
+                    } else if (!isVerified) {
                         statusText.innerText = "사용자 분석 중 (정면을 응시하세요)";
                         statusText.style.color = "#1c1e21";
                         drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#ccc');
-                    } else if (isAbnormal) {
-                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#007AFF');
                     }
 
                     lastNosePos = { x: nose.x, y: nose.y };
