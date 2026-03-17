@@ -17,70 +17,30 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;
             transition: all 0.3s ease;
         }
+        /* PC/크롬북 호환성을 위한 16:9 비율 설정 */
         .camera-container {
-            position: relative; width: 90vw; max-width: 420px; height: 65vh; max-height: 550px;
-            border-radius: 30px; overflow: hidden; background: #000;
+            position: relative; width: 90vw; max-width: 960px; aspect-ratio: 16 / 9;
+            border-radius: 20px; overflow: hidden; background: #000;
             box-shadow: 0 20px 40px rgba(0,0,0,0.15);
-            transition: background-color 0.3s ease;
         }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transition: opacity 0.3s ease; }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); transition: opacity 0.3s ease; }
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
         
-        .camera-container.loading {
-            background-color: #ffffff;
+        .spinner-inline {
+            width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%; border-top-color: #fff;
+            animation: spin 1s linear infinite; display: inline-block; vertical-align: middle;
         }
-        .camera-container.loading video,
-        .camera-container.loading canvas {
-            opacity: 0;
-            visibility: hidden;
-        }
-        .camera-container.loading .spinner {
-            display: block;
-        }
-
-        .spinner {
-            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
-            margin: -25px 0 0 -25px; animation: rotate 2s linear infinite;
-            display: none; z-index: 10;
-        }
-        .spinner .path {
-            stroke: #007AFF; stroke-linecap: round;
-            animation: dash 1.5s ease-in-out infinite;
-        }
-        @keyframes rotate { 100% { transform: rotate(360deg); } }
-        @keyframes dash {
-            0% { stroke-dasharray: 1, 150; stroke-dashoffset: 0; }
-            50% { stroke-dasharray: 90, 150; stroke-dashoffset: -35; }
-            100% { stroke-dasharray: 90, 150; stroke-dashoffset: -124; }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
         #status {
-            margin-top: 24px; padding: 16px 32px; background: white; border-radius: 50px;
-            font-size: 16px; font-weight: 700; color: #1c1e21; 
-            box-shadow: 0 8px 20px rgba(0,0,0,0.08); transition: all 0.3s ease;
-            text-align: center;
+            margin-top: 24px; padding: 12px 24px; background: white; border-radius: 50px;
+            font-size: 15px; font-weight: 700; color: #1c1e21; 
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
         }
 
-        #successScreen {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%);
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.5s ease;
-        }
-        #successScreen.active {
-            opacity: 1; visibility: visible;
-        }
-        .success-content {
-            text-align: center; transform: translateY(40px) scale(0.95); opacity: 0;
-            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s;
-        }
-        #successScreen.active .success-content {
-            transform: translateY(0) scale(1); opacity: 1;
-        }
-
-        .welcome-title { margin: 0 0 16px 0; font-size: 28px; font-weight: 800; color: #1c1e21; }
-        .info-label { font-size: 14px; color: #9ca3af; margin-bottom: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
-        .info-text { font-size: 18px; color: #374151; font-weight: 600; margin-bottom: 8px; }
+        /* 기존 successScreen은 기능 유지를 위해 숨김 처리만 함 */
+        #successScreen { display: none; }
     </style>
 </head>
 <body>
@@ -89,222 +49,127 @@
         <div class="camera-container">
             <video id="video" autoplay muted playsinline></video>
             <canvas id="overlay"></canvas>
-            <svg class="spinner" viewBox="0 0 50 50">
-                <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
-            </svg>
         </div>
-        <div id="status">시스템 준비 중...</div>
+        <div id="status">모델 로딩 중...</div>
     </div>
 
-    <div id="successScreen">
-        <div class="success-content">
-            <img src="https://cdn-icons-png.flaticon.com/512/5494/5494997.png" width="130" style="margin-bottom: 24px; filter: drop-shadow(0 12px 24px rgba(0,122,255,0.25));">
-            <h2 id="welcomeName" class="welcome-title">이름님 환영합니다</h2>
-            <div class="info-label">회원정보</div>
-            <div id="infoName" class="info-text">이름: </div>
-            <div id="infoBirth" class="info-text">생년월일: </div>
-        </div>
-    </div>
+    <div id="successScreen"></div>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('overlay');
         const statusText = document.getElementById('status');
-        const cameraContainer = document.getElementById('cameraContainer');
-        const successScreen = document.getElementById('successScreen');
-
-        let lastNosePos = { x: 0, y: 0 };
-        let lastBoxWidth = 0;
-        let score = 0;
-        let isVerified = false;
-        let isRequesting = false;
         
-        let capturedFrames = [];
-        let earlyCaptured = false;
-        let backendPromise = null;
-        let isBackendWoken = false; 
-        
-        let isAbnormal = false;
-        let abnormalTimer = null;
-
-        // 5번 터치 초기화 관련 변수
-        let tapCount = 0;
-        let tapTimer = null;
-
-        document.body.addEventListener('click', () => {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch((err) => {
-                    console.log(`전체화면 전환 오류: ${err.message}`);
-                });
-            }
-        });
-
-        // [추가됨] 환영합니다 화면을 5번 누르면 초기화되는 이벤트
-        successScreen.addEventListener('click', (e) => {
-            e.stopPropagation(); // 전체화면 토글 이벤트 방지
-            tapCount++;
-            clearTimeout(tapTimer);
-
-            if (tapCount >= 5) {
-                // 초기화 로직 실행
-                successScreen.classList.remove('active');
-                document.querySelector('.camera-container').classList.remove('loading');
-                
-                isVerified = false; 
-                score = 0; 
-                isRequesting = false; 
-                capturedFrames = []; 
-                earlyCaptured = false; 
-                backendPromise = null;
-                isBackendWoken = false;
-                isAbnormal = false;
-                
-                statusText.innerText = "시스템 준비 중...";
-                statusText.style.color = "#1c1e21";
-                
-                tapCount = 0;
-            } else {
-                tapTimer = setTimeout(() => {
-                    tapCount = 0;
-                }, 1500); // 1.5초 이내에 5번을 터치해야만 인정
-            }
-        });
+        // 실시간 인식 상태 저장용
+        let recognitionResults = {}; 
 
         async function init() {
-            const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
-            await Promise.all([
-                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
-            ]);
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-            video.srcObject = stream;
-            video.onloadedmetadata = () => {
-                video.play();
-                detect();
-            };
+            try {
+                const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+                statusText.innerText = "AI 모델 불러오는 중...";
+                // 호환성을 위해 모델 먼저 로드
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+                ]);
+                
+                statusText.innerText = "카메라 권한 요청 중...";
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    statusText.innerText = "시스템 작동 중";
+                    detect();
+                };
+            } catch (err) {
+                statusText.innerText = "오류: " + err.message;
+            }
         }
 
-        function drawBox(ctx, x, y, w, h, radius, color) {
+        // 라벨이 붙은 박스 그리기 함수
+        function drawFaceBox(ctx, x, y, w, h, name, isAnalyzing) {
+            const color = isAnalyzing ? '#FFD700' : '#007AFF'; // 분석중 노란색, 완료 파란색
+            
+            // 테두리
             ctx.strokeStyle = color;
-            ctx.lineWidth = 5;
-            ctx.beginPath();
-            ctx.moveTo(x + radius, y);
-            ctx.lineTo(x + w - radius, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-            ctx.lineTo(x + w, y + h - radius);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-            ctx.lineTo(x + radius, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-            ctx.lineTo(x, y + radius);
-            ctx.quadraticCurveTo(x, y, x + radius, y);
-            ctx.stroke();
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, y, w, h);
+
+            // 상단 이름표 사각형 (평평한 직선 부분에 부착)
+            const labelHeight = 30;
+            ctx.fillStyle = color;
+            ctx.fillRect(x - 2, y - labelHeight, w + 4, labelHeight);
+
+            // 텍스트/로딩 표시
+            ctx.fillStyle = "white";
+            ctx.font = "bold 14px sans-serif";
+            ctx.textAlign = "center";
+            if (isAnalyzing) {
+                ctx.fillText("분석 중...", x + (w / 2), y - 10);
+            } else {
+                ctx.fillText(name, x + (w / 2), y - 10);
+            }
         }
 
         async function detect() {
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
-            // 저가형 태블릿 최적화 (50ms -> 150ms 로 부하 대폭 감소)
             setInterval(async () => {
-                if (isRequesting) return;
-
                 const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
                     .withFaceLandmarks();
                 
-                if (isRequesting) return; 
-
                 const resized = faceapi.resizeResults(results, displaySize);
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                if (resized.length > 0) {
-                    if (!isBackendWoken) {
-                        isBackendWoken = true;
-                        fetch('https://jaewondev2.pythonanywhere.com/wakeup').catch(()=>{});
-                    }
-
-                    resized.sort((a, b) => {
-                        return (b.detection.box.width * b.detection.box.height) - (a.detection.box.width * a.detection.box.height);
-                    });
-
-                    const det = resized[0];
+                resized.forEach((det, index) => {
                     const box = det.detection.box;
-                    const nose = det.landmarks.getNose()[3];
+                    const faceId = `face_${index}`; // 간단한 인덱스 기반 ID
 
-                    const adjW = box.width * 1.45; 
-                    const adjH = box.height * 1.25; 
-                    const adjX = box.x - (adjW - box.width) / 2;
-                    const adjY = box.y - (adjH * 0.25);
-
-                    // [수정됨] 프론트엔드의 비정상 움직임(사진) 판별 로직 완전 제거. 얼굴 감지 시 무조건 점수 상승 및 캡처 진행
-                    score++;
-                    
-                    if ([1, 2, 3].includes(score) && capturedFrames.length < 3) {
+                    // 서버에 분석 요청 (결과가 없을 때만)
+                    if (!recognitionResults[faceId]) {
+                        recognitionResults[faceId] = { name: "분석 중", status: "analyzing" };
+                        
                         const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = video.videoWidth; 
+                        tempCanvas.width = video.videoWidth;
                         tempCanvas.height = video.videoHeight;
                         const tCtx = tempCanvas.getContext('2d');
-                        tCtx.translate(tempCanvas.width, 0); 
-                        tCtx.scale(-1, 1); 
                         tCtx.drawImage(video, 0, 0);
-                        capturedFrames.push(tempCanvas.toDataURL('image/jpeg', 0.9)); 
-                    }
+                        const frameData = tempCanvas.toDataURL('image/jpeg', 0.8);
 
-                    if (score === 3 && !earlyCaptured) {
-                        earlyCaptured = true;
-                        backendPromise = fetch('https://jaewondev2.pythonanywhere.com/recognize', {
+                        fetch('https://jaewondev2.pythonanywhere.com/recognize', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ images: capturedFrames })
-                        }).then(res => res.json()).catch(err => ({success: false, error: true}));
+                            body: JSON.stringify({ images: [frameData] })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                recognitionResults[faceId] = { name: data.name, status: "complete" };
+                            } else {
+                                recognitionResults[faceId] = { name: "미등록자", status: "complete" };
+                            }
+                        })
+                        .catch(() => {
+                            recognitionResults[faceId] = null; // 실패 시 재시도 가능하게
+                        });
                     }
 
-                    if (score > 6) isVerified = true;
+                    const isAnalyzing = recognitionResults[faceId].status === "analyzing";
+                    drawFaceBox(ctx, box.x, box.y, box.width, box.height, recognitionResults[faceId].name, isAnalyzing);
+                });
 
-                    if (isVerified && !isRequesting) {
-                        isRequesting = true; 
-                        statusText.innerText = "서버 결과 동기화 중...";
-                        statusText.style.color = "#007AFF";
-                        
-                        document.querySelector('.camera-container').classList.add('loading');
+                // 얼굴이 사라지면 데이터 초기화 (간단한 구현)
+                if (resized.length === 0) recognitionResults = {};
 
-                        if (backendPromise) {
-                            backendPromise.then(data => {
-                                if (data.success) {
-                                    document.getElementById('welcomeName').innerText = `${data.name}님 환영합니다`;
-                                    document.getElementById('infoName').innerText = `이름: ${data.name}`;
-                                    document.getElementById('infoBirth').innerText = `생년월일: ${data.birthdate}`;
-                                    successScreen.classList.add('active');
-                                } else {
-                                    statusText.innerText = data.message || "보안 검증 실패: 미등록자이거나 가로채기 감지됨.";
-                                    statusText.style.color = "#FF3B30";
-                                    setTimeout(() => { 
-                                        document.querySelector('.camera-container').classList.remove('loading');
-                                        isVerified = false; score = 0; isRequesting = false; 
-                                        capturedFrames = []; earlyCaptured = false; backendPromise = null;
-                                        statusText.style.color = "#1c1e21"; 
-                                    }, 2000);
-                                }
-                            });
-                        }
-                    } else if (!isVerified) {
-                        statusText.innerText = "사용자 분석 중 (정면을 응시하세요)";
-                        statusText.style.color = "#1c1e21";
-                        drawBox(ctx, adjX, adjY, adjW, adjH, 25, '#ccc');
-                    }
-
-                    lastNosePos = { x: nose.x, y: nose.y };
-                    lastBoxWidth = box.width;
-                } else {
-                    score = 0;
-                    isVerified = false;
-                    capturedFrames = []; earlyCaptured = false; backendPromise = null;
-                    if (!isAbnormal) {
-                        statusText.innerText = "얼굴이 감지되지 않습니다.";
-                        statusText.style.color = "#1c1e21";
-                    }
-                }
-            }, 150);
+            }, 200);
         }
 
         init();
