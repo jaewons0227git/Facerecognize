@@ -17,30 +17,33 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;
             transition: all 0.3s ease;
         }
-        /* PC/크롬북 호환성을 위한 16:9 비율 설정 */
-        .camera-container {
-            position: relative; width: 90vw; max-width: 960px; aspect-ratio: 16 / 9;
-            border-radius: 20px; overflow: hidden; background: #000;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
-        }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
         
-        .spinner-inline {
-            width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 50%; border-top-color: #fff;
-            animation: spin 1s linear infinite; display: inline-block; vertical-align: middle;
+        .camera-container {
+            position: relative; width: 90vw; max-width: 420px; height: 65vh; max-height: 550px;
+            border-radius: 30px; overflow: hidden; background: #000;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            transition: background-color 0.3s ease;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* [추가됨] PC 환경 접속 시 카메라 비율을 16:9로 강제 유지 */
+        @media (min-width: 768px) {
+            .camera-container {
+                max-width: 800px;
+                height: auto;
+                aspect-ratio: 16 / 9;
+                max-height: none;
+            }
+        }
+
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transition: opacity 0.3s ease; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); transition: opacity 0.3s ease; }
+        
         #status {
-            margin-top: 24px; padding: 12px 24px; background: white; border-radius: 50px;
-            font-size: 15px; font-weight: 700; color: #1c1e21; 
-            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+            margin-top: 24px; padding: 16px 32px; background: white; border-radius: 50px;
+            font-size: 16px; font-weight: 700; color: #1c1e21; 
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08); transition: all 0.3s ease;
+            text-align: center;
         }
-
-        /* 기존 successScreen은 기능 유지를 위해 숨김 처리만 함 */
-        #successScreen { display: none; }
     </style>
 </head>
 <body>
@@ -50,73 +53,180 @@
             <video id="video" autoplay muted playsinline></video>
             <canvas id="overlay"></canvas>
         </div>
-        <div id="status">모델 로딩 중...</div>
+        <div id="status">시스템 준비 중...</div>
     </div>
-
-    <div id="successScreen"></div>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('overlay');
         const statusText = document.getElementById('status');
         
-        // 실시간 인식 상태 저장용
-        let recognitionResults = {}; 
+        let isBackendWoken = false; 
+        let activeFaces = []; 
+        let faceIdCounter = 0;
 
+        document.body.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch((err) => {
+                    console.log(`전체화면 전환 오류: ${err.message}`);
+                });
+            }
+        });
+
+        // [수정됨] 모듈을 완전히 불러온 다음 카메라 권한을 획득하도록 변경 (크롬북 호환성 패치)
         async function init() {
             try {
+                statusText.innerText = "AI 모델 로딩 중...";
                 const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
-                statusText.innerText = "AI 모델 불러오는 중...";
-                // 호환성을 위해 모델 먼저 로드
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
                 ]);
                 
                 statusText.innerText = "카메라 권한 요청 중...";
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        facingMode: 'user',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
                     video.play();
-                    statusText.innerText = "시스템 작동 중";
-                    detect();
+                    statusText.innerText = "다중 안면 인식 시스템 동작 중";
+                    requestAnimationFrame(drawLoop); // 렌더링 루프 시작
+                    detect(); // 감지 루프 시작
                 };
             } catch (err) {
                 statusText.innerText = "오류: " + err.message;
+                console.error(err);
             }
         }
 
-        // 라벨이 붙은 박스 그리기 함수
-        function drawFaceBox(ctx, x, y, w, h, name, isAnalyzing) {
-            const color = isAnalyzing ? '#FFD700' : '#007AFF'; // 분석중 노란색, 완료 파란색
-            
-            // 테두리
+        // 라벨 박스 위쪽 모서리만 둥글게 그리는 함수
+        function drawTopRoundedRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h);
+            ctx.lineTo(x, y + h);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.fill();
+        }
+
+        // [수정/추가됨] 상단 사각형 및 뒤집힘 방지 적용 테두리 렌더링
+        function drawBox(ctx, x, y, w, h, radius, color, text, isLoading) {
+            // 메인 테두리 박스
             ctx.strokeStyle = color;
-            ctx.lineWidth = 4;
-            ctx.strokeRect(x, y, w, h);
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + w - radius, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+            ctx.lineTo(x + w, y + h - radius);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+            ctx.lineTo(x + radius, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.stroke();
 
-            // 상단 이름표 사각형 (평평한 직선 부분에 부착)
-            const labelHeight = 30;
+            // 위쪽 평평한 직선 부분에 붙어있는 상태/이름 라벨 도형
+            const labelW = Math.max(140, w * 0.6);
+            const labelH = 40;
+            const labelX = x + (w - labelW) / 2;
+            const labelY = y - labelH;
+
             ctx.fillStyle = color;
-            ctx.fillRect(x - 2, y - labelHeight, w + 4, labelHeight);
+            drawTopRoundedRect(ctx, labelX, labelY, labelW, labelH, 10);
 
-            // 텍스트/로딩 표시
-            ctx.fillStyle = "white";
-            ctx.font = "bold 14px sans-serif";
-            ctx.textAlign = "center";
-            if (isAnalyzing) {
-                ctx.fillText("분석 중...", x + (w / 2), y - 10);
+            // 글자 및 로딩 애니메이션 뒤집힘 방지 (캔버스 scale 처리 상쇄)
+            ctx.save();
+            ctx.scale(-1, 1);
+            const mirroredX = -(labelX + labelW);
+            const centerX = mirroredX + labelW / 2;
+            const centerY = labelY + labelH / 2;
+
+            if (isLoading) {
+                // 캔버스 내부에 네이티브로 구현한 로딩 애니메이션 (기존 CSS 스피너 디자인 차용)
+                const time = Date.now();
+                const angle = (time % 1500) / 1500 * Math.PI * 2;
+                const dashOffset = Math.sin(time / 300) * Math.PI * 0.5;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, 12, angle, angle + Math.PI + Math.max(0.1, dashOffset));
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.stroke();
             } else {
-                ctx.fillText(name, x + (w / 2), y - 10);
+                // 이름 표시
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 18px -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, centerX, centerY + 2);
             }
+            ctx.restore();
         }
 
+        // [추가됨] 개별 얼굴마다 잘라내어 캡처 (백엔드의 복수 인식을 위해 프론트엔드에서 분리 전송)
+        function captureCroppedFace(videoElement, box) {
+            const pad = box.width * 0.4;
+            const fullCanvas = document.createElement('canvas');
+            fullCanvas.width = videoElement.videoWidth;
+            fullCanvas.height = videoElement.videoHeight;
+            const fCtx = fullCanvas.getContext('2d');
+            
+            // 이미지 뒤집기 동일 적용
+            fCtx.translate(fullCanvas.width, 0);
+            fCtx.scale(-1, 1);
+            fCtx.drawImage(videoElement, 0, 0);
+
+            const mirroredX = fullCanvas.width - box.x - box.width;
+            const msx = Math.max(0, mirroredX - pad);
+            const msy = Math.max(0, box.y - pad);
+            const msw = Math.min(fullCanvas.width - msx, box.width + pad * 2);
+            const msh = Math.min(fullCanvas.height - msy, box.height + pad * 2);
+
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = msw;
+            cropCanvas.height = msh;
+            const cCtx = cropCanvas.getContext('2d');
+            cCtx.drawImage(fullCanvas, msx, msy, msw, msh, 0, 0, msw, msh);
+
+            return cropCanvas.toDataURL('image/jpeg', 0.9);
+        }
+
+        // 캔버스 화면 실시간 그리기 루프
+        function drawLoop() {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 동시에 여러 명을 실시간으로 렌더링
+            for (const face of activeFaces) {
+                const box = face.box;
+                const adjW = box.width * 1.45; 
+                const adjH = box.height * 1.25; 
+                const adjX = box.x - (adjW - box.width) / 2;
+                const adjY = box.y - (adjH * 0.25);
+
+                let color = '#ccc';
+                let isLoading = false;
+                let text = face.name;
+
+                if (face.status === 'analyzing' || face.status === 'fetching') {
+                    color = '#FFCC00'; // 노란색
+                    isLoading = true;
+                } else if (face.status === 'verified') {
+                    color = '#007AFF'; // 파란색
+                } else if (face.status === 'failed') {
+                    color = '#FF3B30'; // 빨간색
+                }
+
+                drawBox(ctx, adjX, adjY, adjW, adjH, 25, color, text, isLoading);
+            }
+
+            requestAnimationFrame(drawLoop);
+        }
+
+        // 여러 명을 계속 동시에 감지하고 분석하는 핵심 루프
         async function detect() {
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(canvas, displaySize);
@@ -126,50 +236,93 @@
                     .withFaceLandmarks();
                 
                 const resized = faceapi.resizeResults(results, displaySize);
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (resized.length > 0 && !isBackendWoken) {
+                    isBackendWoken = true;
+                    fetch('https://jaewondev2.pythonanywhere.com/wakeup').catch(()=>{});
+                }
 
-                resized.forEach((det, index) => {
-                    const box = det.detection.box;
-                    const faceId = `face_${index}`; // 간단한 인덱스 기반 ID
+                const currentBoxes = resized.map(det => det.detection.box);
+                const updatedFaces = [];
+                const now = Date.now();
 
-                    // 서버에 분석 요청 (결과가 없을 때만)
-                    if (!recognitionResults[faceId]) {
-                        recognitionResults[faceId] = { name: "분석 중", status: "analyzing" };
-                        
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = video.videoWidth;
-                        tempCanvas.height = video.videoHeight;
-                        const tCtx = tempCanvas.getContext('2d');
-                        tCtx.drawImage(video, 0, 0);
-                        const frameData = tempCanvas.toDataURL('image/jpeg', 0.8);
+                // 기존 얼굴들과 새로 감지된 얼굴을 매칭하여 추적
+                for (const box of currentBoxes) {
+                    let matchedFace = null;
+                    let minDist = Infinity;
 
-                        fetch('https://jaewondev2.pythonanywhere.com/recognize', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ images: [frameData] })
-                        })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                recognitionResults[faceId] = { name: data.name, status: "complete" };
-                            } else {
-                                recognitionResults[faceId] = { name: "미등록자", status: "complete" };
-                            }
-                        })
-                        .catch(() => {
-                            recognitionResults[faceId] = null; // 실패 시 재시도 가능하게
-                        });
+                    for (const face of activeFaces) {
+                        const dx = face.box.x - box.x;
+                        const dy = face.box.y - box.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist < box.width) { 
+                            if (dist < minDist) { minDist = dist; matchedFace = face; }
+                        }
                     }
 
-                    const isAnalyzing = recognitionResults[faceId].status === "analyzing";
-                    drawFaceBox(ctx, box.x, box.y, box.width, box.height, recognitionResults[faceId].name, isAnalyzing);
-                });
+                    if (matchedFace) {
+                        matchedFace.box = box;
+                        matchedFace.lastUpdate = now;
+                        updatedFaces.push(matchedFace);
+                        activeFaces = activeFaces.filter(f => f !== matchedFace);
+                        
+                        if (matchedFace.status === 'analyzing') {
+                            matchedFace.frames.push(captureCroppedFace(video, box));
+                            if (matchedFace.frames.length >= 3) {
+                                matchedFace.status = 'fetching';
+                                requestAnalysis(matchedFace);
+                            }
+                        }
+                    } else {
+                        // 새롭게 감지된 사용자
+                        const newFace = {
+                            id: faceIdCounter++,
+                            box: box,
+                            status: 'analyzing',
+                            name: '',
+                            frames: [captureCroppedFace(video, box)],
+                            lastUpdate: now
+                        };
+                        updatedFaces.push(newFace);
+                    }
+                }
 
-                // 얼굴이 사라지면 데이터 초기화 (간단한 구현)
-                if (resized.length === 0) recognitionResults = {};
+                // 프레임 깜빡임 방지용 유지 시간
+                for (const face of activeFaces) {
+                    if (now - face.lastUpdate < 500) {
+                        updatedFaces.push(face);
+                    }
+                }
 
-            }, 200);
+                activeFaces = updatedFaces;
+
+            }, 150);
+        }
+
+        // 서버 비동기 전송
+        function requestAnalysis(face) {
+            fetch('https://jaewondev2.pythonanywhere.com/recognize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ images: face.frames })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    face.status = 'verified';
+                    face.name = data.name;
+                } else {
+                    face.status = 'failed';
+                    face.name = '미등록/오류';
+                    // 2초 뒤 다시 재분석을 위해 상태 초기화
+                    setTimeout(() => { if(face.status === 'failed') face.status = 'analyzing'; face.frames = []; }, 2000);
+                }
+            })
+            .catch(err => {
+                face.status = 'failed';
+                face.name = '서버 오류';
+                setTimeout(() => { if(face.status === 'failed') face.status = 'analyzing'; face.frames = []; }, 2000);
+            });
         }
 
         init();
