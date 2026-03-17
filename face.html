@@ -99,16 +99,15 @@
 
         async function init() {
             try {
-                statusText.innerText = "AI 모델 로딩 중...";
+                statusText.innerText = "고정밀 AI 모델 로딩 중...";
                 const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
-                // 저사양 최적화를 위해 무거운 faceLandmark68Net을 제거하고 경량 모델만 로드
-                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                // [수정됨] 부정확한 tinyFaceDetector 대신 가장 정확도가 높은 ssdMobilenetv1 모듈 사용
+                await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
                 
                 statusText.innerText = "카메라 권한 요청 중...";
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
                 video.srcObject = stream;
                 video.onloadedmetadata = () => {
-                    // 비디오 원본 해상도에 맞춰 캔버스 내부 해상도를 동기화하여 박스 찌그러짐 원천 차단
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     video.play();
@@ -123,7 +122,6 @@
             }
         }
 
-        // 라벨 박스 위쪽 모서리만 둥글게 그리는 함수
         function drawTopRoundedRect(ctx, x, y, w, h, r) {
             ctx.beginPath();
             ctx.moveTo(x + r, y);
@@ -186,7 +184,6 @@
         }
 
         function captureCroppedFace(videoElement, box) {
-            // [유지됨] 백엔드 전송 시에는 얼굴 전체가 다 들어가도록 40% 여유 공간(padding) 유지
             const pad = box.width * 0.4;
             const fullCanvas = document.createElement('canvas');
             fullCanvas.width = videoElement.videoWidth;
@@ -218,11 +215,13 @@
 
             for (const face of activeFaces) {
                 const box = face.box;
-                // [수정됨] 렌더링되는 외곽선을 얼굴 크기에 딱 맞게 대폭 축소 (기존 1.45배 -> 1.05배)
-                const adjW = box.width * 1.05; 
-                const adjH = box.height * 1.15; 
+                
+                // [수정됨] 머리카락이 포함되도록 박스를 위쪽으로 더 길게 확장하는 로직
+                // 가로는 약간만 여유를 두고, 세로는 1.5배로 늘리면서 위치를 위쪽(머리카락 쪽)으로 끌어올림
+                const adjW = box.width * 1.15; 
+                const adjH = box.height * 1.5; 
                 const adjX = box.x - (adjW - box.width) / 2;
-                const adjY = box.y - (adjH - box.height) / 2;
+                const adjY = box.y - (box.height * 0.35); // 얼굴 중심 기준 위로 크게 확장
 
                 let color = '#ccc';
                 let isLoading = false;
@@ -233,7 +232,6 @@
                     isLoading = true;
                 } else if (face.status === 'verified') {
                     color = '#007AFF'; 
-                    // 백그라운드 확인 중이어도 로딩을 띄우지 않고 상태 유지
                 } else if (face.status === 'failed') {
                     color = '#FF3B30'; 
                 }
@@ -249,7 +247,8 @@
             faceapi.matchDimensions(canvas, displaySize);
 
             setInterval(async () => {
-                const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160 }));
+                // [수정됨] 고정밀 모듈(SsdMobilenetv1)을 사용하여 얼굴의 전체 윤곽을 정확히 잡아냄
+                const results = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }));
                 const resized = faceapi.resizeResults(results, displaySize);
                 
                 if (resized.length > 0 && !isBackendWoken) {
@@ -280,7 +279,6 @@
                         updatedFaces.push(matchedFace);
                         activeFaces = activeFaces.filter(f => f !== matchedFace);
                         
-                        // 이름이 뜬 상태(verified)여도 뒤에서 몰래 계속 캡처함
                         if (matchedFace.status === 'analyzing' || matchedFace.status === 'verified') {
                             if (!matchedFace.isFetchingBackground) {
                                 matchedFace.frames.push(captureCroppedFace(video, box));
