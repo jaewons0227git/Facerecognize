@@ -186,6 +186,7 @@
         }
 
         function captureCroppedFace(videoElement, box) {
+            // [유지됨] 백엔드 전송 시에는 얼굴 전체가 다 들어가도록 40% 여유 공간(padding) 유지
             const pad = box.width * 0.4;
             const fullCanvas = document.createElement('canvas');
             fullCanvas.width = videoElement.videoWidth;
@@ -217,10 +218,11 @@
 
             for (const face of activeFaces) {
                 const box = face.box;
-                const adjW = box.width * 1.45; 
-                const adjH = box.height * 1.25; 
+                // [수정됨] 렌더링되는 외곽선을 얼굴 크기에 딱 맞게 대폭 축소 (기존 1.45배 -> 1.05배)
+                const adjW = box.width * 1.05; 
+                const adjH = box.height * 1.15; 
                 const adjX = box.x - (adjW - box.width) / 2;
-                const adjY = box.y - (adjH * 0.25);
+                const adjY = box.y - (adjH - box.height) / 2;
 
                 let color = '#ccc';
                 let isLoading = false;
@@ -246,9 +248,7 @@
             const displaySize = { width: video.videoWidth, height: video.videoHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
-            // CPU 부하 방지를 위해 주기를 200ms로 약간 늦춤
             setInterval(async () => {
-                // 랜드마크 분석 제외 및 inputSize 축소로 엄청난 성능 향상 (저사양 호환)
                 const results = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160 }));
                 const resized = faceapi.resizeResults(results, displaySize);
                 
@@ -286,9 +286,9 @@
                                 matchedFace.frames.push(captureCroppedFace(video, box));
                                 if (matchedFace.frames.length >= 3) {
                                     if (matchedFace.status === 'analyzing') {
-                                        matchedFace.status = 'fetching'; // 최초에는 로딩 띄움
+                                        matchedFace.status = 'fetching'; 
                                     } else {
-                                        matchedFace.isFetchingBackground = true; // 이후엔 로딩 안 띄우고 플래그만 전환
+                                        matchedFace.isFetchingBackground = true; 
                                     }
                                     requestAnalysis(matchedFace);
                                 }
@@ -343,7 +343,7 @@
             })
             .finally(() => {
                 face.frames = [];
-                face.isFetchingBackground = false; // 분석 완료 후 플래그 해제 (다음 루프에서 다시 캡처 시작)
+                face.isFetchingBackground = false; 
             });
         }
 
